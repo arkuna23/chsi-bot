@@ -4,9 +4,6 @@ import { normalizeProvinceInput } from '../shared/provinces';
 import { normalizeWhitespace } from '../shared/text';
 import { SqliteDatabase } from '../storage/database';
 
-const MAX_SUMMARY_SCHOOLS = 6;
-const MAX_REGION_SCHOOLS = 4;
-
 function findBestPrefix(group: GroupSubscription, majorCode: string): PrefixSubscription | null {
   const matches = group.prefixes.filter((prefix) => majorCode.startsWith(prefix.prefix));
   if (matches.length === 0) {
@@ -18,6 +15,10 @@ function findBestPrefix(group: GroupSubscription, majorCode: string): PrefixSubs
 
 function normalizeSchoolName(name: string): string {
   return normalizeWhitespace(name);
+}
+
+function formatMajor(listing: StoredAdjustmentListing): string {
+  return `${listing.majorCode} ${normalizeWhitespace(listing.majorName)}`;
 }
 
 function formatProvince(province: string): string {
@@ -34,17 +35,9 @@ function dedupeSchools(listings: StoredAdjustmentListing[]): string[] {
   );
 }
 
-function formatSchoolList(schools: string[], maxVisible: number): string {
-  if (schools.length <= maxVisible) {
-    return schools.join('、');
-  }
-
-  return `${schools.slice(0, maxVisible).join('、')} 等${schools.length}所`;
-}
-
 function formatSummary(prefix: string, listings: StoredAdjustmentListing[]): string {
   const schools = dedupeSchools(listings);
-  return `${prefix} 新增院校：${formatSchoolList(schools, MAX_SUMMARY_SCHOOLS)}`;
+  return `${prefix} 新增院校：${schools.join('、')}`;
 }
 
 function formatRegionDetails(prefix: PrefixSubscription, listings: StoredAdjustmentListing[]): string[] {
@@ -58,25 +51,34 @@ function formatRegionDetails(prefix: PrefixSubscription, listings: StoredAdjustm
     return [];
   }
 
-  const grouped = new Map<string, string[]>();
+  const grouped = new Map<string, Map<string, string[]>>();
   for (const listing of scoped) {
     const province = formatProvince(listing.province);
-    const schools = grouped.get(province) ?? [];
-    schools.push(normalizeSchoolName(listing.schoolName));
-    grouped.set(province, schools);
+    const schoolName = normalizeSchoolName(listing.schoolName);
+    const provinceMap = grouped.get(province) ?? new Map<string, string[]>();
+    const majors = provinceMap.get(schoolName) ?? [];
+    majors.push(formatMajor(listing));
+    provinceMap.set(schoolName, majors);
+    grouped.set(province, provinceMap);
   }
 
   const regionParts: string[] = [];
   for (const region of prefix.regions) {
-    const schools = grouped.get(region);
-    if (!schools || schools.length === 0) {
+    const schoolMap = grouped.get(region);
+    if (!schoolMap || schoolMap.size === 0) {
       continue;
     }
 
-    const dedupedSchools = Array.from(new Set(schools)).sort((left, right) =>
-      left.localeCompare(right, 'zh-Hans-CN'),
-    );
-    regionParts.push(`${region}：${formatSchoolList(dedupedSchools, MAX_REGION_SCHOOLS)}`);
+    const schoolParts = Array.from(schoolMap.entries())
+      .sort(([left], [right]) => left.localeCompare(right, 'zh-Hans-CN'))
+      .map(([schoolName, majors]) => {
+        const dedupedMajors = Array.from(new Set(majors)).sort((left, right) =>
+          left.localeCompare(right, 'zh-Hans-CN'),
+        );
+        return `${schoolName}（${dedupedMajors.join('、')}）`;
+      });
+
+    regionParts.push(`${region}：${schoolParts.join('；')}`);
   }
 
   if (regionParts.length === 0) {

@@ -60,10 +60,31 @@ const secondListingSameSchool: StoredAdjustmentListing = {
   majorName: '人工智能',
 };
 
+const thirdListingAnotherSchool: StoredAdjustmentListing = {
+  ...listing,
+  stableKey: 'x3',
+  snapshotHash: 'y3',
+  sourceId: '3',
+  schoolName: '苏州大学',
+  schoolId: '10285',
+  majorCode: '085402',
+  majorName: '通信工程',
+};
+
 describe('NotificationService', () => {
-  test('prefers longest matching prefix and joins notification lines with newlines', () => {
-    const messages = createService().buildMessages(group, [listing, secondListingSameSchool]);
+  test('prefers longest matching prefix and renders all schools with region majors', () => {
+    const messages = createService().buildMessages(group, [
+      listing,
+      secondListingSameSchool,
+      thirdListingAnotherSchool,
+    ]);
     expect(messages).toHaveLength(1);
-    expect(messages[0]).toBe(['0854 新增院校：南京大学', '关注地区：', '江苏：南京大学'].join('\n'));
+    expect(messages[0]).toBe(
+      [
+        '0854 新增院校：南京大学、苏州大学',
+        '关注地区：',
+        '江苏：南京大学（085400 电子信息、085401 人工智能）；苏州大学（085402 通信工程）',
+      ].join('\n'),
+    );
   });
 });

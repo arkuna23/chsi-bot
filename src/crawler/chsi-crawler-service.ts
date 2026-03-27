@@ -50,7 +50,7 @@ export class ChsiCrawlerService {
   async crawlByMajorPrefix(prefix: string) {
     const normalized = normalizePrefix(prefix);
     const requestPrefix = getRootPrefix(normalized);
-    this.logger.info('Crawling single prefix via grouped strategy', {
+    this.logger.info('Starting single prefix crawl', {
       prefix: normalized,
       requestPrefix,
     });
@@ -79,20 +79,11 @@ export class ChsiCrawlerService {
 
     for (const [requestPrefix, requestedPrefixes] of groupedPrefixes) {
       try {
-        this.logger.info('Crawling grouped prefixes', {
-          requestPrefix,
-          requestedPrefixes,
-        });
         const listings = await this.apiClient.fetchAllByPrefix(requestPrefix);
 
         for (const prefix of requestedPrefixes) {
           const filtered = filterListingsByPrefix(prefix, listings);
           results.set(prefix, filtered);
-          this.logger.info('Finished filtered prefix crawl', {
-            requestPrefix,
-            prefix,
-            listingCount: filtered.length,
-          });
         }
       } catch (error) {
         if (error instanceof AuthExpiredError) {
@@ -122,6 +113,9 @@ export class ChsiCrawlerService {
     this.logger.info('Finished batch crawl', {
       successCount: results.size,
       errorCount: errors.size,
+      listingCounts: Object.fromEntries(
+        Array.from(results.entries()).map(([prefix, listings]) => [prefix, listings.length]),
+      ),
     });
     return {
       results,

@@ -187,17 +187,12 @@ export class ChsiApiClient {
 		this.logger.info("Starting CHSI fetch by prefix", { prefix });
 		const listings: AdjustmentListing[] = [];
 		let start = 0;
+		let pageCount = 0;
 
 		for (;;) {
 			const page = await this.queryPage(prefix, start);
 			listings.push(...page.listings);
-			this.logger.debug("Fetched CHSI page", {
-				prefix,
-				start,
-				pageCount: page.listings.length,
-				accumulatedCount: listings.length,
-				nextStart: page.nextStart,
-			});
+			pageCount += 1;
 			if (page.nextStart === null) {
 				break;
 			}
@@ -206,6 +201,7 @@ export class ChsiApiClient {
 
 		this.logger.info("Finished CHSI fetch by prefix", {
 			prefix,
+			pageCount,
 			totalCount: listings.length,
 		});
 		return listings;
@@ -230,12 +226,6 @@ export class ChsiApiClient {
 		);
 
 		await this.waitForRequestSlot();
-		this.logger.debug("Sending CHSI page request", {
-			prefix,
-			start,
-			pageSize: this.appConfig.chsiPageSize,
-			url: this.apiConfig.queryUrl,
-		});
 
 		const response = await fetch(this.apiConfig.queryUrl, {
 			method: this.apiConfig.method,
@@ -283,7 +273,6 @@ export class ChsiApiClient {
 		}
 
 		if (isNoDataResponse(payload)) {
-			this.logger.info("CHSI returned no data for prefix page", { prefix, start });
 			return {
 				listings: [],
 				nextStart: null,
@@ -293,15 +282,6 @@ export class ChsiApiClient {
 
 		const records = payload.msg?.data?.vo_list?.vos ?? [];
 		const pagenation = payload.msg?.data?.vo_list?.pagenation ?? null;
-		this.logger.debug("Received CHSI page response", {
-			prefix,
-			start,
-			recordCount: records.length,
-			nextStart: pagenation?.nextPageAvailable
-				? pagenation.startOfNextPage
-				: null,
-			totalCount: pagenation?.totalCount ?? null,
-		});
 
 		return {
 			listings: records.map((record) => toListing(record, prefix)),
@@ -318,9 +298,6 @@ export class ChsiApiClient {
 		const nextAllowedAt = this.lastRequestStartedAt + intervalMs;
 
 		if (now < nextAllowedAt) {
-			this.logger.debug("Waiting before next CHSI request", {
-				waitMs: nextAllowedAt - now,
-			});
 			await sleep(nextAllowedAt - now);
 		}
 
