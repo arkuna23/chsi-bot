@@ -35,9 +35,17 @@ function dedupeSchools(listings: StoredAdjustmentListing[]): string[] {
   );
 }
 
+function formatSummarySchools(schools: string[]): string {
+  if (schools.length <= 20) {
+    return schools.join('、');
+  }
+
+  return `${schools.slice(0, 20).join('、')}（仅展示前20所）`;
+}
+
 function formatSummary(prefix: string, listings: StoredAdjustmentListing[]): string {
   const schools = dedupeSchools(listings);
-  return `${prefix} 新增院校：${schools.join('、')}`;
+  return `${prefix} 新增 ${listings.length} 条，涉及 ${schools.length} 所院校：${formatSummarySchools(schools)}`;
 }
 
 function formatRegionDetails(prefix: PrefixSubscription, listings: StoredAdjustmentListing[]): string[] {

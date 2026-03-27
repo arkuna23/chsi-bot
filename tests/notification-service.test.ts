@@ -81,10 +81,44 @@ describe('NotificationService', () => {
     expect(messages).toHaveLength(1);
     expect(messages[0]).toBe(
       [
-        '0854 新增院校：南京大学、苏州大学',
+        '0854 新增 3 条，涉及 2 所院校：南京大学、苏州大学',
         '关注地区：',
         '江苏：南京大学（085400 电子信息、085401 人工智能）；苏州大学（085402 通信工程）',
       ].join('\n'),
     );
+  });
+
+  test('caps summary school names at 20 while keeping total counts', () => {
+    const manySchools = Array.from({ length: 21 }, (_, index) => ({
+      ...listing,
+      stableKey: `many-${index + 1}`,
+      snapshotHash: `hash-${index + 1}`,
+      sourceId: String(index + 1),
+      schoolName: `学校${String(index + 1).padStart(2, '0')}`,
+      schoolId: `10${index + 1}`,
+      majorCode: '080100',
+      majorName: `专业${index + 1}`,
+    }));
+
+    const messages = createService().buildMessages(
+      {
+        ...group,
+        prefixes: [
+          {
+            ...group.prefixes[0],
+            prefix: '08',
+            regions: [],
+          },
+        ],
+      },
+      manySchools,
+    );
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain('08 新增 21 条，涉及 21 所院校：');
+    expect(messages[0]).toContain('学校01');
+    expect(messages[0]).toContain('学校20');
+    expect(messages[0]).not.toContain('学校21');
+    expect(messages[0]).toContain('仅展示前20所');
   });
 });
