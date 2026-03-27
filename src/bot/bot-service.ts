@@ -114,7 +114,7 @@ export class BotService {
 
         if (result.sessionStatus === 'AUTH_EXPIRED') {
           this.logger.warn('Manual check failed because CHSI session expired', { groupId });
-          await this.reply(groupId, buildAuthExpiredMessage());
+          await this.reply(groupId, buildAuthExpiredMessage(result.authRecoveryStatus));
           return;
         }
 

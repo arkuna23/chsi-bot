@@ -1,4 +1,9 @@
 export type SessionStatus = 'VALID' | 'AUTH_EXPIRED' | 'UNKNOWN';
+export type AuthRecoveryStatus =
+  | 'NONE'
+  | 'AUTO_LOGIN_SUCCESS'
+  | 'AUTO_LOGIN_FAILED'
+  | 'CHALLENGE_REQUIRED';
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
@@ -144,4 +149,5 @@ export interface PollRunResult {
   updatedListingCount: number;
   errors: Record<string, string>;
   sessionStatus: SessionStatus;
+  authRecoveryStatus: AuthRecoveryStatus;
 }

@@ -9,6 +9,7 @@ It uses the live CHSI HTTP interface instead of browser-driven scraping for sche
 - Poll CHSI adjustment intention listings by major prefix such as `08`, `0812`, or `0854`
 - Use the live CHSI interface `POST /sytj/stu/tjyxqexxcx.action`
 - Reuse CHSI authentication from a cookie header, a cookie file, or Playwright `storageState`
+- Optionally auto re-login with CHSI username/password when the session expires
 - Persist subscriptions, seen listings, checkpoints, and notification logs in SQLite via Node built-in `node:sqlite`
 - Connect to OneBot11 through forward WebSocket
 - Send only new listing notifications
@@ -35,6 +36,7 @@ pnpm install
    - Set `CHSI_COOKIE_HEADER`
    - Set `CHSI_COOKIE_FILE`
    - Run `pnpm login:chsi` and save Playwright `storageState`
+   - Optionally set `CHSI_LOGIN_USERNAME` and `CHSI_LOGIN_PASSWORD` for automatic re-login
 4. Optionally verify the interface:
 
 ```bash
@@ -65,6 +67,8 @@ Authentication is resolved in this order:
 3. `CHSI_STORAGE_STATE_PATH`
 
 This means the project is not coupled to a repository-local cookie file. `cookies.txt` is ignored by Git.
+
+If the CHSI session expires and both `CHSI_LOGIN_USERNAME` and `CHSI_LOGIN_PASSWORD` are configured, the bot will launch a headful Chrome window, attempt automatic re-login once, persist the refreshed `storageState`, and retry the interrupted polling run once.
 
 ## How Crawling Works
 
@@ -141,6 +145,10 @@ Main variables:
   Optional cookie file path
 - `CHSI_COOKIE_HEADER`
   Optional raw `Cookie:` header value
+- `CHSI_LOGIN_USERNAME`
+  Optional CHSI account username for automatic re-login
+- `CHSI_LOGIN_PASSWORD`
+  Optional CHSI account password for automatic re-login
 - `CHSI_API_CONFIG_PATH`
   Optional API configuration file path
 - `CHSI_PAGE_SIZE`

@@ -1,4 +1,9 @@
-import type { GroupSubscription, PollRunResult, PrefixSubscription } from '../types/domain';
+import type {
+  AuthRecoveryStatus,
+  GroupSubscription,
+  PollRunResult,
+  PrefixSubscription,
+} from '../types/domain';
 
 function formatPrefixes(group: GroupSubscription | null): string {
   if (!group || group.prefixes.length === 0) {
@@ -158,21 +163,42 @@ export function buildRunningMessage(): string {
   return '当前已有检查任务在运行，请稍后再试。';
 }
 
-export function buildAuthExpiredMessage(): string {
-  return [
-    '检查失败：CHSI 登录态已失效。',
-    '请重新导入 Cookie，或重新执行登录流程后再试。',
-  ].join('\n');
+export function buildAuthExpiredMessage(authRecoveryStatus: AuthRecoveryStatus): string {
+  switch (authRecoveryStatus) {
+    case 'AUTO_LOGIN_FAILED':
+      return [
+        '检查失败：CHSI 登录态已失效。',
+        '系统已尝试自动重新登录，但未成功。',
+        '请检查环境变量中的账号密码，或手动重新执行登录流程。',
+      ].join('\n');
+    case 'CHALLENGE_REQUIRED':
+      return [
+        '检查失败：CHSI 登录态已失效。',
+        '系统尝试自动重新登录时遇到验证码或短信验证。',
+        '请人工完成登录后再重试。',
+      ].join('\n');
+    default:
+      return [
+        '检查失败：CHSI 登录态已失效。',
+        '当前未配置自动重新登录账号密码。',
+        '请手动重新执行登录流程，或在环境变量中补充账号密码后再试。',
+      ].join('\n');
+  }
 }
 
 export function buildCheckResultMessage(result: PollRunResult): string {
-  const lines = [
-    '检查完成。',
+  const lines = ['检查完成。'];
+
+  if (result.authRecoveryStatus === 'AUTO_LOGIN_SUCCESS') {
+    lines.push('检测到登录态失效后，系统已自动重新登录并完成本次检查。');
+  }
+
+  lines.push(
     `抓取前缀：${result.prefixes.length > 0 ? result.prefixes.join('、') : '无'}`,
     `实际完成抓取的前缀数：${result.crawledPrefixes.length}`,
     `新增记录：${result.newListingCount} 条`,
     `内容更新：${result.updatedListingCount} 条`,
-  ];
+  );
 
   if (result.prefixes.length === 0) {
     lines.push('当前群还没有任何订阅前缀，请先发送：@机器人 /sub 08');

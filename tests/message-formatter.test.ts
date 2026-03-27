@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import {
+  buildAuthExpiredMessage,
   buildCheckResultMessage,
   buildGroupStatusMessage,
   buildHelpMessage,
@@ -55,11 +56,19 @@ describe('message formatter', () => {
       updatedListingCount: 1,
       errors: { '0854': 'fetch failed' },
       sessionStatus: 'VALID',
+      authRecoveryStatus: 'AUTO_LOGIN_SUCCESS',
     };
 
     const message = buildCheckResultMessage(result);
     expect(message).toContain('检查完成。');
+    expect(message).toContain('系统已自动重新登录并完成本次检查');
     expect(message).toContain('新增记录：3 条');
     expect(message).toContain('0854：fetch failed');
+  });
+
+  test('auth expired message is rendered in Chinese for challenge flow', () => {
+    const message = buildAuthExpiredMessage('CHALLENGE_REQUIRED');
+    expect(message).toContain('登录态已失效');
+    expect(message).toContain('验证码或短信验证');
   });
 });

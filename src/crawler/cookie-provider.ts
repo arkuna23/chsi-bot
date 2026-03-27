@@ -48,9 +48,23 @@ function extractFromStorageState(state: StorageState): string | null {
 }
 
 export class ChsiCookieProvider {
+  private runtimeCookieHeader: string | null = null;
+
   constructor(private readonly config: AppConfig) {}
 
+  setRuntimeCookieHeader(value: string): void {
+    this.runtimeCookieHeader = stripCookiePrefix(value);
+  }
+
+  clearRuntimeCookieHeader(): void {
+    this.runtimeCookieHeader = null;
+  }
+
   getCookieHeader(): string {
+    if (this.runtimeCookieHeader) {
+      return this.runtimeCookieHeader;
+    }
+
     if (this.config.chsiCookieHeader) {
       return stripCookiePrefix(this.config.chsiCookieHeader);
     }

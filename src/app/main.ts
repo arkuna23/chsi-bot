@@ -5,7 +5,9 @@ import { DiffService } from '../subscription/diff-service';
 import { NotificationService } from '../subscription/notification-service';
 import { ChsiCookieProvider } from '../crawler/cookie-provider';
 import { ChsiApiClient } from '../crawler/chsi-api-client';
+import { ChsiAuthRecoveryService } from '../crawler/chsi-auth-recovery-service';
 import { ChsiCrawlerService } from '../crawler/chsi-crawler-service';
+import { ChsiLoginService } from '../crawler/chsi-login-service';
 import { OneBotClient } from '../bot/onebot-client';
 import { PollingCoordinator } from '../scheduler/polling-coordinator';
 import { BotService } from '../bot/bot-service';
@@ -18,6 +20,7 @@ async function main(): Promise<void> {
     sqlitePath: config.sqlitePath,
     chsiStorageStatePath: config.chsiStorageStatePath,
     chsiCookieFile: config.chsiCookieFile,
+    chsiAutoLoginConfigured: Boolean(config.chsiLoginUsername && config.chsiLoginPassword),
     chsiPageSize: config.chsiPageSize,
     chsiRequestIntervalMs: config.chsiRequestIntervalMs,
     pollIntervalMinutes: config.pollIntervalMinutes,
@@ -34,6 +37,13 @@ async function main(): Promise<void> {
   const notificationService = new NotificationService(database, logger.child('NotificationService'));
   const cookieProvider = new ChsiCookieProvider(config);
   const apiClient = new ChsiApiClient(config, cookieProvider, logger.child('ChsiApiClient'));
+  const loginService = new ChsiLoginService(config, logger.child('ChsiLoginService'));
+  const authRecoveryService = new ChsiAuthRecoveryService(
+    config,
+    cookieProvider,
+    loginService,
+    logger.child('ChsiAuthRecoveryService'),
+  );
   const crawlerService = new ChsiCrawlerService(apiClient, logger.child('ChsiCrawlerService'));
   const oneBotClient = new OneBotClient(
     config.oneBotWsUrl!,
@@ -43,6 +53,7 @@ async function main(): Promise<void> {
   const pollingCoordinator = new PollingCoordinator(
     subscriptionService,
     crawlerService,
+    authRecoveryService,
     diffService,
     notificationService,
     oneBotClient,

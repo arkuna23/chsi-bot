@@ -1,5 +1,5 @@
 export class AuthExpiredError extends Error {
-  constructor(message = 'CHSI session expired') {
+  constructor(message = 'CHSI 登录态已失效') {
     super(message);
     this.name = 'AuthExpiredError';
   }

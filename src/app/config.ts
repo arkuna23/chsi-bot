@@ -11,6 +11,8 @@ export interface AppConfig {
   chsiStorageStatePath: string;
   chsiCookieFile: string | null;
   chsiCookieHeader: string | null;
+  chsiLoginUsername: string | null;
+  chsiLoginPassword: string | null;
   chsiApiConfigPath: string;
   chsiPageSize: number;
   chsiRequestIntervalMs: number;
@@ -66,6 +68,8 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     ),
     chsiCookieFile: resolveOptionalAppPath(process.env.CHSI_COOKIE_FILE),
     chsiCookieHeader: process.env.CHSI_COOKIE_HEADER?.trim() || null,
+    chsiLoginUsername: process.env.CHSI_LOGIN_USERNAME?.trim() || null,
+    chsiLoginPassword: process.env.CHSI_LOGIN_PASSWORD?.trim() || null,
     chsiApiConfigPath: resolveAppPath(
       process.env.CHSI_API_CONFIG_PATH ?? '',
       'data/chsi-api-config.json',
