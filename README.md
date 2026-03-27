@@ -148,7 +148,7 @@ Main variables:
 - `CHSI_REQUEST_INTERVAL_MS`
   Default `1500`
 - `POLL_INTERVAL_MINUTES`
-  Default `30`
+  Default `60`
 - `ADMIN_GROUP_IDS`
   Comma-separated admin group IDs for alerts
 

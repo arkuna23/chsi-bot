@@ -72,7 +72,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     ),
     chsiPageSize: parseInteger(process.env.CHSI_PAGE_SIZE, 100),
     chsiRequestIntervalMs: parseInteger(process.env.CHSI_REQUEST_INTERVAL_MS, 1500),
-    pollIntervalMinutes: parseInteger(process.env.POLL_INTERVAL_MINUTES, 30),
+    pollIntervalMinutes: parseInteger(process.env.POLL_INTERVAL_MINUTES, 60),
     adminGroupIds: (process.env.ADMIN_GROUP_IDS ?? '')
       .split(',')
       .map((value) => value.trim())
