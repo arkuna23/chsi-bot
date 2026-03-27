@@ -59,6 +59,7 @@ const LOGIN_CHECK_PREFIX = '08';
 const LOGIN_CHECK_INTERVAL_MS = 3_000;
 const LOGIN_PROGRESS_LOG_EVERY = 10;
 const AUTO_LOGIN_TIMEOUT_MS = 30_000;
+const LOGIN_FORM_WAIT_TIMEOUT_MS = 15_000;
 const REQUEST_HEADERS = {
   Accept: 'application/json, text/javascript, */*; q=0.01',
   'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8',
@@ -132,6 +133,7 @@ export class ChsiLoginService {
   async loginInteractively(): Promise<ChsiLoginResult> {
     return this.withHeadfulContext(async ({ context, page, chromePath }) => {
       await this.openLoginPage(page);
+      await this.waitForLoginReady(page, context);
 
       this.logger.info('Interactive CHSI login browser opened', { chromePath });
       this.logger.info('Waiting for manual CHSI login');
@@ -149,6 +151,7 @@ export class ChsiLoginService {
   async loginWithCredentials(username: string, password: string): Promise<ChsiLoginResult> {
     return this.withHeadfulContext(async ({ context, page, chromePath }) => {
       await this.openLoginPage(page);
+      await this.waitForLoginReady(page, context);
 
       this.logger.info('Attempting automatic CHSI login', { chromePath });
 
@@ -159,6 +162,7 @@ export class ChsiLoginService {
 
       const credentialsFilled = await this.fillCredentials(page, username, password);
       if (!credentialsFilled) {
+        this.logger.error('Failed to locate CHSI login form', await this.capturePageState(page));
         return {
           status: 'FAILED',
           message: '未找到 CHSI 登录表单，无法自动填写账号密码。',
@@ -168,6 +172,10 @@ export class ChsiLoginService {
 
       const submitted = await this.submitLogin(page);
       if (!submitted) {
+        this.logger.error(
+          'Failed to locate CHSI login submit control',
+          await this.capturePageState(page),
+        );
         return {
           status: 'FAILED',
           message: '未找到 CHSI 登录按钮，无法提交登录表单。',
@@ -255,6 +263,36 @@ export class ChsiLoginService {
       }
 
       this.logger.warn('CHSI login page load timed out but browser remains open');
+    }
+  }
+
+  private async waitForLoginReady(page: Page, context: BrowserContext): Promise<void> {
+    const startedAt = Date.now();
+
+    for (;;) {
+      if (await this.hasValidChsiSession(context)) {
+        this.logger.info('CHSI session is already valid while preparing login page');
+        return;
+      }
+
+      const usernameField = await this.findVisibleLocator(page, USERNAME_SELECTORS);
+      const passwordField = await this.findVisibleLocator(page, PASSWORD_SELECTORS);
+      if (usernameField && passwordField) {
+        this.logger.info('CHSI login form is ready', {
+          url: page.url(),
+        });
+        return;
+      }
+
+      if (Date.now() - startedAt >= LOGIN_FORM_WAIT_TIMEOUT_MS) {
+        this.logger.warn(
+          'Timed out waiting for CHSI login form to appear',
+          await this.capturePageState(page),
+        );
+        return;
+      }
+
+      await sleep(300);
     }
   }
 
@@ -419,5 +457,21 @@ export class ChsiLoginService {
     }
 
     return null;
+  }
+
+  private async capturePageState(page: Page): Promise<{
+    url: string;
+    title: string;
+    readyState: string;
+    bodyText: string;
+  }> {
+    const readyState = await page.evaluate(() => document.readyState).catch(() => 'unknown');
+
+    return {
+      url: page.url(),
+      title: await page.title().catch(() => ''),
+      readyState,
+      bodyText: (await this.readBodyText(page)).slice(0, 500),
+    };
   }
 }
