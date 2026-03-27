@@ -27,11 +27,18 @@ export class PollingCoordinator {
 
   async runOnce(targetGroupId?: string): Promise<PollRunResult | null> {
     if (this.running) {
+      this.logger.warn('Skipping polling run because another run is in progress', {
+        targetGroupId: targetGroupId ?? null,
+      });
       return null;
     }
 
     this.running = true;
+    const startedAt = Date.now();
     try {
+      this.logger.info('Starting polling run', {
+        targetGroupId: targetGroupId ?? null,
+      });
       const groups = targetGroupId
         ? this.getScopedGroups(targetGroupId)
         : this.subscriptionService.listEnabledGroups();
@@ -41,7 +48,18 @@ export class PollingCoordinator {
         ),
       ).sort((left, right) => left.length - right.length || left.localeCompare(right));
 
+      this.logger.info('Resolved polling scope', {
+        groupCount: groups.length,
+        groupIds: groups.map((group) => group.groupId),
+        prefixCount: prefixes.length,
+        prefixes,
+      });
+
       if (groups.length === 0 || prefixes.length === 0) {
+        this.logger.info('Polling run finished without crawl because scope is empty', {
+          groupCount: groups.length,
+          prefixCount: prefixes.length,
+        });
         return {
           prefixes,
           crawledPrefixes: [],
@@ -55,9 +73,15 @@ export class PollingCoordinator {
 
       const crawlResult = await this.crawlerService.crawlByMajorPrefixes(prefixes);
       const errors = Object.fromEntries(crawlResult.errors.entries());
+      this.logger.info('Crawler returned result', {
+        sessionStatus: crawlResult.sessionStatus,
+        crawledPrefixCount: crawlResult.results.size,
+        errorCount: crawlResult.errors.size,
+      });
 
       if (crawlResult.sessionStatus === 'AUTH_EXPIRED') {
         await this.sendAdminAlert('CHSI session expired');
+        this.logger.warn('Polling run stopped because CHSI session expired');
         return {
           prefixes,
           crawledPrefixes: Array.from(crawlResult.results.keys()),
@@ -71,15 +95,29 @@ export class PollingCoordinator {
 
       const allListings = Array.from(crawlResult.results.values()).flat();
       const diff = this.diffService.detectNewListings(allListings);
+      this.logger.info('Diff detection finished', {
+        crawledListingCount: allListings.length,
+        newListingCount: diff.newListings.length,
+        updatedListingCount: diff.updatedListings.length,
+      });
 
       for (const prefix of prefixes) {
         const error = crawlResult.errors.get(prefix) ?? null;
+        this.logger.debug('Updating crawl checkpoint', {
+          prefix,
+          status: error ? 'ERROR' : 'SUCCESS',
+          error,
+        });
         this.database.updateCheckpoint(prefix, error ? 'ERROR' : 'SUCCESS', error);
       }
 
       const sentGroups: string[] = [];
       for (const group of groups) {
         const messages = this.notificationService.buildMessages(group, diff.newListings);
+        this.logger.info('Prepared notifications for group', {
+          groupId: group.groupId,
+          messageCount: messages.length,
+        });
         if (messages.length === 0 || !this.oneBotClient) {
           continue;
         }
@@ -91,6 +129,13 @@ export class PollingCoordinator {
         sentGroups.push(group.groupId);
       }
 
+      this.logger.info('Polling run finished', {
+        durationMs: Date.now() - startedAt,
+        sentGroupCount: sentGroups.length,
+        sentGroups,
+        newListingCount: diff.newListings.length,
+        updatedListingCount: diff.updatedListings.length,
+      });
       return {
         prefixes,
         crawledPrefixes: Array.from(crawlResult.results.keys()),
@@ -121,6 +166,10 @@ export class PollingCoordinator {
     }
 
     for (const groupId of this.adminGroupIds) {
+      this.logger.warn('Sending admin alert', {
+        groupId,
+        message,
+      });
       await this.oneBotClient.sendGroupMessage(groupId, message);
     }
   }

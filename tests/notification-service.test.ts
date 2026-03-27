@@ -51,10 +51,19 @@ const listing: StoredAdjustmentListing = {
   rawPayload: {},
 };
 
+const secondListingSameSchool: StoredAdjustmentListing = {
+  ...listing,
+  stableKey: 'x2',
+  snapshotHash: 'y2',
+  sourceId: '2',
+  majorCode: '085401',
+  majorName: '人工智能',
+};
+
 describe('NotificationService', () => {
-  test('prefers longest matching prefix', () => {
-    const messages = createService().buildMessages(group, [listing]);
-    expect(messages[0]).toContain('0854');
-    expect(messages[1]).toContain('Jiangsu');
+  test('prefers longest matching prefix and joins notification lines with newlines', () => {
+    const messages = createService().buildMessages(group, [listing, secondListingSameSchool]);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toBe(['0854 新增院校：南京大学', '关注地区：', '江苏：南京大学'].join('\n'));
   });
 });

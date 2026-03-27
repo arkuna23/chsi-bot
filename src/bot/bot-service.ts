@@ -1,68 +1,33 @@
-import type { BotCommand, GroupSubscription, OneBotMessageEvent } from '../types/domain';
+import type { BotCommand, OneBotMessageEvent } from '../types/domain';
 import { parseCommand } from './command-parser';
 import { OneBotClient } from './onebot-client';
+import { Logger } from '../shared/logger';
 import { SubscriptionService } from '../subscription/subscription-service';
 import { PollingCoordinator } from '../scheduler/polling-coordinator';
-
-function extractMessageText(event: OneBotMessageEvent): string {
-  if (typeof event.raw_message === 'string') {
-    return event.raw_message;
-  }
-
-  if (typeof event.message === 'string') {
-    return event.message;
-  }
-
-  if (Array.isArray(event.message)) {
-    return event.message
-      .map((segment) => {
-        const data = (segment as { data?: { text?: string } }).data;
-        return typeof data?.text === 'string' ? data.text : '';
-      })
-      .join('');
-  }
-
-  return '';
-}
-
-function formatGroupState(group: GroupSubscription | null): string {
-  if (!group) {
-    return 'disabled\nno subscriptions';
-  }
-
-  const header = group.enabled ? 'enabled' : 'disabled';
-  if (group.prefixes.length === 0) {
-    return `${header}\nno subscriptions`;
-  }
-
-  const lines = group.prefixes.map((prefix) => {
-    if (prefix.regions.length === 0) {
-      return `${prefix.prefix}: all regions`;
-    }
-    return `${prefix.prefix}: ${prefix.regions.join(', ')}`;
-  });
-
-  return [header, ...lines].join('\n');
-}
-
-function helpText(): string {
-  return [
-    '/on',
-    '/off',
-    '/sub <prefix>',
-    '/unsub <prefix>',
-    '/ls',
-    '/region <prefix> <province...>',
-    '/unregion <prefix>',
-    '/check',
-  ].join('\n');
-}
+import { extractMentionedCommand } from './mention-command';
+import {
+  buildAuthExpiredMessage,
+  buildCheckingMessage,
+  buildCheckResultMessage,
+  buildDisableMessage,
+  buildEnableFirstMessage,
+  buildEnableMessage,
+  buildGroupStatusMessage,
+  buildHelpMessage,
+  buildRegionMessage,
+  buildRunningMessage,
+  buildSubscribeMessage,
+  buildUnknownCommandMessage,
+  buildUnregionMessage,
+  buildUnsubscribeMessage,
+} from './message-formatter';
 
 export class BotService {
   constructor(
     private readonly oneBotClient: OneBotClient,
     private readonly subscriptionService: SubscriptionService,
     private readonly pollingCoordinator: PollingCoordinator,
+    private readonly logger: Logger = new Logger('BotService'),
   ) {}
 
   async handleMessage(event: OneBotMessageEvent): Promise<void> {
@@ -71,89 +36,104 @@ export class BotService {
       return;
     }
 
-    const { command, error } = parseCommand(extractMessageText(event));
+    const { commandText, mentioned } = extractMentionedCommand(event);
+    if (!mentioned || !commandText) {
+      return;
+    }
+
+    const { command, error } = parseCommand(commandText);
     if (!command && !error) {
       return;
     }
 
     if (error) {
+      this.logger.warn('Command parse failed', { groupId, commandText, error });
       await this.reply(groupId, error);
       return;
     }
 
+    this.logger.info('Executing command', { groupId, command });
     await this.executeCommand(groupId, command!);
   }
 
   private async executeCommand(groupId: string, command: BotCommand): Promise<void> {
     switch (command.type) {
-      case 'on':
-        this.subscriptionService.enableGroup(groupId);
-        await this.reply(groupId, 'enabled');
+      case 'on': {
+        const group = this.subscriptionService.enableGroup(groupId);
+        await this.reply(groupId, buildEnableMessage(group));
         return;
-      case 'off':
-        this.subscriptionService.disableGroup(groupId);
-        await this.reply(groupId, 'disabled');
+      }
+      case 'off': {
+        const group = this.subscriptionService.disableGroup(groupId);
+        await this.reply(groupId, buildDisableMessage(group));
         return;
+      }
       case 'help':
-        await this.reply(groupId, helpText());
+        await this.reply(groupId, buildHelpMessage());
         return;
       case 'list':
-        await this.reply(groupId, formatGroupState(this.subscriptionService.getGroup(groupId)));
+        await this.reply(groupId, buildGroupStatusMessage(this.subscriptionService.getGroup(groupId)));
         return;
-      case 'sub':
-        this.subscriptionService.subscribePrefix(groupId, command.prefix);
-        await this.reply(groupId, `subscribed ${command.prefix}`);
+      case 'sub': {
+        const group = this.subscriptionService.subscribePrefix(groupId, command.prefix);
+        await this.reply(groupId, buildSubscribeMessage(group, command.prefix));
         return;
-      case 'unsub':
-        this.subscriptionService.unsubscribePrefix(groupId, command.prefix);
-        await this.reply(groupId, `unsubscribed ${command.prefix}`);
+      }
+      case 'unsub': {
+        const group = this.subscriptionService.unsubscribePrefix(groupId, command.prefix);
+        await this.reply(groupId, buildUnsubscribeMessage(group, command.prefix));
         return;
+      }
       case 'region': {
         const group = this.subscriptionService.setRegionFilter(
           groupId,
           command.prefix,
           command.provinces,
         );
-        const current = group.prefixes.find((item) => item.prefix === command.prefix);
-        await this.reply(
-          groupId,
-          `${command.prefix} regions: ${current?.regions.join(', ') ?? 'all regions'}`,
-        );
+        await this.reply(groupId, buildRegionMessage(group, command.prefix));
         return;
       }
       case 'unregion':
         this.subscriptionService.clearRegionFilter(groupId, command.prefix);
-        await this.reply(groupId, `${command.prefix} region filter cleared`);
+        await this.reply(groupId, buildUnregionMessage(command.prefix));
         return;
       case 'check': {
         const group = this.subscriptionService.getGroup(groupId);
         if (!group || !group.enabled) {
-          await this.reply(groupId, 'enable first with /on');
+          await this.reply(groupId, buildEnableFirstMessage());
           return;
         }
 
-        await this.reply(groupId, 'checking');
+        await this.reply(groupId, buildCheckingMessage());
         const result = await this.pollingCoordinator.runOnce(groupId);
         if (result === null) {
-          await this.reply(groupId, 'another run is active');
+          this.logger.warn('Manual check skipped because polling is already running', { groupId });
+          await this.reply(groupId, buildRunningMessage());
           return;
         }
 
         if (result.sessionStatus === 'AUTH_EXPIRED') {
-          await this.reply(groupId, 'CHSI session expired');
+          this.logger.warn('Manual check failed because CHSI session expired', { groupId });
+          await this.reply(groupId, buildAuthExpiredMessage());
           return;
         }
 
-        await this.reply(
+        this.logger.info('Manual check finished', {
           groupId,
-          `done: ${result.newListingCount} new, ${result.updatedListingCount} updated`,
-        );
+          result,
+        });
+        await this.reply(groupId, buildCheckResultMessage(result));
         return;
       }
     }
   }
 
   private async reply(groupId: string, message: string): Promise<void> {
+    this.logger.info('Replying to group', {
+      groupId,
+      length: message.length,
+      preview: message.slice(0, 120),
+    });
     await this.oneBotClient.sendGroupMessage(groupId, message);
   }
 }

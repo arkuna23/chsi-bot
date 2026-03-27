@@ -1,5 +1,6 @@
 import type { AdjustmentListing, NewListingDiff, StoredAdjustmentListing } from '../types/domain';
 import { createSnapshotHash, createStableKey } from '../shared/hash';
+import { Logger } from '../shared/logger';
 import { nowIso } from '../shared/time';
 import { SqliteDatabase } from '../storage/database';
 
@@ -19,9 +20,16 @@ function choosePreferredListing(
 }
 
 export class DiffService {
-  constructor(private readonly database: SqliteDatabase) {}
+  constructor(
+    private readonly database: SqliteDatabase,
+    private readonly logger: Logger = new Logger('DiffService'),
+  ) {}
 
   detectNewListings(listings: AdjustmentListing[]): NewListingDiff {
+    this.logger.info('Starting diff detection', {
+      inputCount: listings.length,
+    });
+
     const dedupedMap = new Map<string, AdjustmentListing>();
     for (const listing of listings) {
       const stableKey = createStableKey(listing);
@@ -30,6 +38,10 @@ export class DiffService {
 
     const dedupedEntries = Array.from(dedupedMap.entries());
     const existingMap = this.database.getStoredListings(dedupedEntries.map(([stableKey]) => stableKey));
+    this.logger.debug('Prepared diff inputs', {
+      dedupedCount: dedupedEntries.length,
+      existingCount: existingMap.size,
+    });
     const timestamp = nowIso();
     const upserts: StoredAdjustmentListing[] = [];
     const newListings: StoredAdjustmentListing[] = [];
@@ -58,6 +70,11 @@ export class DiffService {
     }
 
     this.database.upsertListings(upserts);
+    this.logger.info('Finished diff detection', {
+      upsertCount: upserts.length,
+      newCount: newListings.length,
+      updatedCount: updatedListings.length,
+    });
     return { newListings, updatedListings };
   }
 }

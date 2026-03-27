@@ -1,8 +1,13 @@
 import WebSocket, { type RawData } from 'ws';
 
 import type { OneBotMessageEvent, OneBotRequest, OneBotResponse } from '../types/domain';
+import { Logger } from '../shared/logger';
 
 type GroupMessageHandler = (event: OneBotMessageEvent) => Promise<void> | void;
+
+function summarizeText(text: string, maxLength = 120): string {
+  return text.length <= maxLength ? text : `${text.slice(0, maxLength)}...`;
+}
 
 export class OneBotClient {
   private ws: WebSocket | null = null;
@@ -21,10 +26,12 @@ export class OneBotClient {
   constructor(
     private readonly url: string,
     private readonly accessToken: string | null,
+    private readonly logger: Logger = new Logger('OneBotClient'),
   ) {}
 
   async connect(): Promise<void> {
     this.manuallyClosed = false;
+    this.logger.info('Connecting to OneBot websocket', { url: this.url });
     await this.openSocket();
   }
 
@@ -34,6 +41,7 @@ export class OneBotClient {
 
   async close(): Promise<void> {
     this.manuallyClosed = true;
+    this.logger.info('Closing OneBot websocket');
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -49,6 +57,11 @@ export class OneBotClient {
   }
 
   async sendGroupMessage(groupId: string, message: string): Promise<void> {
+    this.logger.info('Sending group message', {
+      groupId,
+      length: message.length,
+      preview: summarizeText(message),
+    });
     await this.sendRequest({
       action: 'send_group_msg',
       params: {
@@ -71,10 +84,12 @@ export class OneBotClient {
 
       ws.once('open', () => {
         this.attachEvents(ws);
+        this.logger.info('OneBot websocket opened');
         resolve();
       });
 
       ws.once('error', (error: Error) => {
+        this.logger.error('OneBot websocket failed to open', error);
         reject(error);
       });
     });
@@ -86,9 +101,13 @@ export class OneBotClient {
     });
 
     ws.on('close', () => {
+      this.logger.warn('OneBot websocket closed', {
+        manuallyClosed: this.manuallyClosed,
+      });
       this.ws = null;
       if (!this.manuallyClosed) {
         this.reconnectTimer = setTimeout(() => {
+          this.logger.warn('Reconnecting to OneBot websocket');
           void this.connect().catch(() => undefined);
         }, 5000);
       }
@@ -102,6 +121,11 @@ export class OneBotClient {
       const pending = this.pending.get(payload.echo)!;
       clearTimeout(pending.timeout);
       this.pending.delete(payload.echo);
+      this.logger.debug('Received OneBot response', {
+        echo: payload.echo,
+        status: payload.status,
+        retcode: payload.retcode,
+      });
       pending.resolve(payload);
       return;
     }
@@ -125,16 +149,29 @@ export class OneBotClient {
     return new Promise<OneBotResponse>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(request.echo);
+        this.logger.error('OneBot request timed out', {
+          action: request.action,
+          echo: request.echo,
+        });
         reject(new Error(`OneBot request timed out: ${request.action}`));
       }, 10000);
 
       this.pending.set(request.echo, { resolve, reject, timeout });
+      this.logger.debug('Sending OneBot request', {
+        action: request.action,
+        echo: request.echo,
+      });
       ws.send(JSON.stringify(request), (error?: Error) => {
         if (!error) {
           return;
         }
         clearTimeout(timeout);
         this.pending.delete(request.echo);
+        this.logger.error('Failed to send OneBot request', {
+          action: request.action,
+          echo: request.echo,
+          error: error.message,
+        });
         reject(error);
       });
     });

@@ -30,17 +30,17 @@ export function parseCommand(input: string): ParsedCommand {
         return { command: { type: 'check' }, error: null };
       case '/sub':
         if (parts.length !== 2) {
-          return { command: null, error: 'usage: /sub <prefix>' };
+          return { command: null, error: '命令格式错误，用法：/sub <prefix>' };
         }
         return { command: { type: 'sub', prefix: normalizePrefix(parts[1]) }, error: null };
       case '/unsub':
         if (parts.length !== 2) {
-          return { command: null, error: 'usage: /unsub <prefix>' };
+          return { command: null, error: '命令格式错误，用法：/unsub <prefix>' };
         }
         return { command: { type: 'unsub', prefix: normalizePrefix(parts[1]) }, error: null };
       case '/region':
         if (parts.length < 3) {
-          return { command: null, error: 'usage: /region <prefix> <province...>' };
+          return { command: null, error: '命令格式错误，用法：/region <prefix> <province...>' };
         }
         return {
           command: {
@@ -52,16 +52,20 @@ export function parseCommand(input: string): ParsedCommand {
         };
       case '/unregion':
         if (parts.length !== 2) {
-          return { command: null, error: 'usage: /unregion <prefix>' };
+          return { command: null, error: '命令格式错误，用法：/unregion <prefix>' };
         }
         return { command: { type: 'unregion', prefix: normalizePrefix(parts[1]) }, error: null };
       default:
-        return { command: null, error: 'unknown command' };
+        return { command: null, error: '不支持的指令，请发送 @机器人 /help 查看帮助。' };
     }
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     return {
       command: null,
-      error: error instanceof Error ? error.message : String(error),
+      error:
+        message === 'prefix must be 2 to 6 digits'
+          ? '专业前缀格式错误，只能输入 2 到 6 位数字。'
+          : message,
     };
   }
 }

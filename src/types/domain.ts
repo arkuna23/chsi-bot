@@ -89,13 +89,35 @@ export interface OneBotResponse<T = unknown> {
   echo?: string;
 }
 
+export interface OneBotTextSegment {
+  type: 'text';
+  data: {
+    text?: string;
+  };
+}
+
+export interface OneBotAtSegment {
+  type: 'at';
+  data: {
+    qq?: string;
+  };
+}
+
+export interface OneBotOtherSegment {
+  type: string;
+  data: Record<string, unknown>;
+}
+
+export type OneBotMessageSegment = OneBotTextSegment | OneBotAtSegment | OneBotOtherSegment;
+
 export interface OneBotMessageEvent {
   post_type: 'message';
   message_type: 'group' | string;
+  self_id?: number;
   group_id?: number;
   user_id?: number;
   raw_message?: string;
-  message?: string | Array<Record<string, unknown>>;
+  message?: string | OneBotMessageSegment[];
 }
 
 export type BotCommand =

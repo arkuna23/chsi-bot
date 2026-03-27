@@ -13,6 +13,7 @@ import { normalizeProvinceCode } from "../shared/provinces";
 import { firstDefined, nonEmptyString } from "../shared/text";
 import { readJsonFile } from "../shared/fs";
 import { sleep } from "../shared/time";
+import { Logger } from "../shared/logger";
 import { ChsiCookieProvider } from "./cookie-provider";
 
 interface ChsiRecord {
@@ -157,36 +158,56 @@ export class ChsiApiClient {
 	constructor(
 		private readonly appConfig: AppConfig,
 		private readonly cookieProvider: ChsiCookieProvider,
+		private readonly logger: Logger = new Logger("ChsiApiClient"),
 	) {
 		this.apiConfig = parseApiConfig(appConfig);
 	}
 
 	async validateSession(): Promise<SessionStatus> {
+		this.logger.info("Validating CHSI session");
 		try {
 			await this.queryPage("08", 0);
+			this.logger.info("CHSI session is valid");
 			return "VALID";
 		} catch (error) {
 			if (error instanceof AuthExpiredError) {
+				this.logger.warn("CHSI session expired during validation");
 				return "AUTH_EXPIRED";
 			}
+			this.logger.error(
+				"CHSI session validation returned unknown status",
+				error instanceof Error ? error.message : String(error),
+			);
 			return "UNKNOWN";
 		}
 	}
 
 	async fetchAllByPrefix(prefixInput: string): Promise<AdjustmentListing[]> {
 		const prefix = normalizePrefix(prefixInput);
+		this.logger.info("Starting CHSI fetch by prefix", { prefix });
 		const listings: AdjustmentListing[] = [];
 		let start = 0;
 
 		for (;;) {
 			const page = await this.queryPage(prefix, start);
 			listings.push(...page.listings);
+			this.logger.debug("Fetched CHSI page", {
+				prefix,
+				start,
+				pageCount: page.listings.length,
+				accumulatedCount: listings.length,
+				nextStart: page.nextStart,
+			});
 			if (page.nextStart === null) {
 				break;
 			}
 			start = page.nextStart;
 		}
 
+		this.logger.info("Finished CHSI fetch by prefix", {
+			prefix,
+			totalCount: listings.length,
+		});
 		return listings;
 	}
 
@@ -209,6 +230,12 @@ export class ChsiApiClient {
 		);
 
 		await this.waitForRequestSlot();
+		this.logger.debug("Sending CHSI page request", {
+			prefix,
+			start,
+			pageSize: this.appConfig.chsiPageSize,
+			url: this.apiConfig.queryUrl,
+		});
 
 		const response = await fetch(this.apiConfig.queryUrl, {
 			method: this.apiConfig.method,
@@ -218,6 +245,11 @@ export class ChsiApiClient {
 
 		const text = await response.text();
 		if (isHtmlResponse(text)) {
+			this.logger.warn("CHSI returned HTML response, treating as auth expired", {
+				prefix,
+				start,
+				status: response.status,
+			});
 			throw new AuthExpiredError();
 		}
 
@@ -225,19 +257,33 @@ export class ChsiApiClient {
 		try {
 			payload = JSON.parse(text) as ChsiPageResponse;
 		} catch (error) {
+			this.logger.error("Failed to parse CHSI JSON response", {
+				prefix,
+				start,
+				error: error instanceof Error ? error.message : String(error),
+			});
 			throw new ChsiApiError(`invalid CHSI JSON response: ${String(error)}`);
 		}
 
 		if (payload.flag !== true || payload.invokeStatus !== "SUCCESS") {
+			this.logger.error("CHSI request failed", {
+				prefix,
+				start,
+				status: response.status,
+				flag: payload.flag,
+				invokeStatus: payload.invokeStatus,
+			});
 			throw new ChsiApiError("CHSI request failed");
 		}
 
 		const pageError = extractPageError(payload);
 		if (pageError && pageError.includes("请选择学科专业")) {
+			this.logger.warn("CHSI rejected prefix request", { prefix, start, pageError });
 			throw new ChsiApiError(pageError);
 		}
 
 		if (isNoDataResponse(payload)) {
+			this.logger.info("CHSI returned no data for prefix page", { prefix, start });
 			return {
 				listings: [],
 				nextStart: null,
@@ -247,6 +293,15 @@ export class ChsiApiClient {
 
 		const records = payload.msg?.data?.vo_list?.vos ?? [];
 		const pagenation = payload.msg?.data?.vo_list?.pagenation ?? null;
+		this.logger.debug("Received CHSI page response", {
+			prefix,
+			start,
+			recordCount: records.length,
+			nextStart: pagenation?.nextPageAvailable
+				? pagenation.startOfNextPage
+				: null,
+			totalCount: pagenation?.totalCount ?? null,
+		});
 
 		return {
 			listings: records.map((record) => toListing(record, prefix)),
@@ -263,6 +318,9 @@ export class ChsiApiClient {
 		const nextAllowedAt = this.lastRequestStartedAt + intervalMs;
 
 		if (now < nextAllowedAt) {
+			this.logger.debug("Waiting before next CHSI request", {
+				waitMs: nextAllowedAt - now,
+			});
 			await sleep(nextAllowedAt - now);
 		}
 

@@ -1,7 +1,11 @@
 import type { GroupSubscription, PrefixSubscription, StoredAdjustmentListing } from '../types/domain';
-import { toEnglishProvince } from '../shared/provinces';
+import { Logger } from '../shared/logger';
+import { normalizeProvinceInput } from '../shared/provinces';
 import { normalizeWhitespace } from '../shared/text';
 import { SqliteDatabase } from '../storage/database';
+
+const MAX_SUMMARY_SCHOOLS = 6;
+const MAX_REGION_SCHOOLS = 4;
 
 function findBestPrefix(group: GroupSubscription, majorCode: string): PrefixSubscription | null {
   const matches = group.prefixes.filter((prefix) => majorCode.startsWith(prefix.prefix));
@@ -12,13 +16,35 @@ function findBestPrefix(group: GroupSubscription, majorCode: string): PrefixSubs
   return matches.sort((left, right) => right.prefix.length - left.prefix.length)[0];
 }
 
-function formatMajor(listing: StoredAdjustmentListing): string {
-  return `${listing.majorCode} ${normalizeWhitespace(listing.majorName)}`;
+function normalizeSchoolName(name: string): string {
+  return normalizeWhitespace(name);
+}
+
+function formatProvince(province: string): string {
+  try {
+    return normalizeProvinceInput(province);
+  } catch {
+    return province;
+  }
+}
+
+function dedupeSchools(listings: StoredAdjustmentListing[]): string[] {
+  return Array.from(new Set(listings.map((listing) => normalizeSchoolName(listing.schoolName)))).sort(
+    (left, right) => left.localeCompare(right, 'zh-Hans-CN'),
+  );
+}
+
+function formatSchoolList(schools: string[], maxVisible: number): string {
+  if (schools.length <= maxVisible) {
+    return schools.join('、');
+  }
+
+  return `${schools.slice(0, maxVisible).join('、')} 等${schools.length}所`;
 }
 
 function formatSummary(prefix: string, listings: StoredAdjustmentListing[]): string {
-  const provinces = Array.from(new Set(listings.map((listing) => toEnglishProvince(listing.province)))).sort();
-  return `${prefix}: ${listings.length} new listings in ${provinces.join(', ')}`;
+  const schools = dedupeSchools(listings);
+  return `${prefix} 新增院校：${formatSchoolList(schools, MAX_SUMMARY_SCHOOLS)}`;
 }
 
 function formatRegionDetails(prefix: PrefixSubscription, listings: StoredAdjustmentListing[]): string[] {
@@ -32,34 +58,53 @@ function formatRegionDetails(prefix: PrefixSubscription, listings: StoredAdjustm
     return [];
   }
 
-  const grouped = new Map<string, Map<string, StoredAdjustmentListing[]>>();
+  const grouped = new Map<string, string[]>();
   for (const listing of scoped) {
-    const province = listing.province;
-    const school = listing.schoolName;
-    const schoolMap = grouped.get(province) ?? new Map<string, StoredAdjustmentListing[]>();
-    const schoolListings = schoolMap.get(school) ?? [];
-    schoolListings.push(listing);
-    schoolMap.set(school, schoolListings);
-    grouped.set(province, schoolMap);
+    const province = formatProvince(listing.province);
+    const schools = grouped.get(province) ?? [];
+    schools.push(normalizeSchoolName(listing.schoolName));
+    grouped.set(province, schools);
   }
 
-  const lines: string[] = [];
-  for (const [province, schoolMap] of grouped) {
-    for (const [school, schoolListings] of schoolMap) {
-      const majors = Array.from(new Set(schoolListings.map((listing) => formatMajor(listing))));
-      lines.push(
-        `${toEnglishProvince(province)}: ${school} added ${majors.length} majors: ${majors.join(', ')}`,
-      );
+  const regionParts: string[] = [];
+  for (const region of prefix.regions) {
+    const schools = grouped.get(region);
+    if (!schools || schools.length === 0) {
+      continue;
     }
+
+    const dedupedSchools = Array.from(new Set(schools)).sort((left, right) =>
+      left.localeCompare(right, 'zh-Hans-CN'),
+    );
+    regionParts.push(`${region}：${formatSchoolList(dedupedSchools, MAX_REGION_SCHOOLS)}`);
   }
-  return lines;
+
+  if (regionParts.length === 0) {
+    return [];
+  }
+
+  return ['关注地区：', ...regionParts];
+}
+
+function buildPrefixMessage(prefix: PrefixSubscription, listings: StoredAdjustmentListing[]): string {
+  const lines = [formatSummary(prefix.prefix, listings)];
+  lines.push(...formatRegionDetails(prefix, listings));
+  return lines.join('\n');
 }
 
 export class NotificationService {
-  constructor(private readonly database: SqliteDatabase) {}
+  constructor(
+    private readonly database: SqliteDatabase,
+    private readonly logger: Logger = new Logger('NotificationService'),
+  ) {}
 
   buildMessages(group: GroupSubscription, newListings: StoredAdjustmentListing[]): string[] {
     if (newListings.length === 0 || group.prefixes.length === 0) {
+      this.logger.debug('Skipping notification build', {
+        groupId: group.groupId,
+        newListingCount: newListings.length,
+        prefixCount: group.prefixes.length,
+      });
       return [];
     }
 
@@ -82,13 +127,25 @@ export class NotificationService {
         continue;
       }
 
-      messages.push(formatSummary(prefix.prefix, listings));
-      messages.push(...formatRegionDetails(prefix, listings));
+      messages.push(buildPrefixMessage(prefix, listings));
     }
+
+    this.logger.info('Built notification messages', {
+      groupId: group.groupId,
+      newListingCount: newListings.length,
+      matchedPrefixCount: grouped.size,
+      messageCount: messages.length,
+    });
+
     return messages;
   }
 
   recordNotification(groupId: string, message: string): void {
+    this.logger.info('Recording notification', {
+      groupId,
+      length: message.length,
+      preview: message.slice(0, 120),
+    });
     this.database.insertNotificationLog(groupId, message);
   }
 }
